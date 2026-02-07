@@ -1,0 +1,87 @@
+# .projectrc - Project-specific configuration for the 'project' CLI tool
+
+PROJECT_COMMIT_TYPES=(
+  chore
+  fix
+  new
+  refactor
+)
+
+# Define what happens when we ENTER the directory
+PROJECT_ON_LOAD=(
+  "echo '🛠️  Project Mode: Ink Dev Enabled'"
+  # "export NODE_ENV=development"
+)
+
+# Define what happens when we LEAVE the directory
+PROJECT_ON_UNLOAD=(
+  "pkill -f 'tsx --watch'"      # Kill the watchers
+  # "unset NODE_ENV"              # Clean up environment
+)
+
+typeset -A PROJECT_CUSTOM_COMMANDS
+
+PROJECT_CUSTOM_COMMANDS=(
+    build "Build Project -- npm run build"
+		watch "Hot Re-Build -- npm run dev"
+    examples  "Browse Examples"
+)
+
+project_list_files() {
+    ls -lah
+}
+
+project_build() {
+    npm run build
+}
+
+project_examples() {
+		local pane_count=$(tmux list-panes | wc -l)
+		local current_pane_id=$(tmux display-message -p '#{pane_id}')
+		local target_pane_id=""
+
+		# 1. Create the split only if needed
+		if (( pane_count == 1 )); then
+			# Capture the new ID immediately upon creation
+			target_pane_id=$(tmux split-window -h -l 75% -P -F "#{pane_id}")
+			tmux select-pane -t "$current_pane_id"
+		else
+			# If a split already exists, find the ID of the 'other' pane
+			target_pane_id=$(tmux list-panes -F "#{pane_id}" | grep -v "$current_pane_id" | head -n 1)
+		fi
+
+		# 2. Run fzf
+		find examples -name "*.tsx" | fzf \
+			--reverse \
+			--height=100% \
+			--prompt="Ink Gallery > " \
+			--bind "enter:execute(tmux send-keys -t $target_pane_id 'C-c' 'C-l' 'DEV=true npx tsx {}' Enter; tmux select-pane -t $target_pane_id)" \
+			--header "Press ESC to exit gallery and close the right pane"
+
+		# 3. Cleanup: Kill the specific target pane
+		if [[ -n "$target_pane_id" ]]; then
+			tmux kill-pane -t "$target_pane_id" 2>/dev/null
+		fi
+}
+
+project_run_test() {
+		DEV=true npx tsx examples/use-focus/use-focus.tsx
+}
+
+run_example() {
+		DEV=true npx tsx --watch examples/$1/$1.tsx
+}
+
+
+# Define your project-specific mappings
+# Syntax: KEY_SEQUENCE=WIDGET_NAME
+typeset -A PROJECT_KEYS
+
+# Just map them here
+PROJECT_KEYS=(
+    "^[t" "echo It works!"
+    "^[r" "DEV=true npx tsx --watch examples/use-focus-with-id/use-focus-with-id.tsx"
+    "^[b" "project_build"
+    "^[w" "npm run dev"
+    "^[e" "project_examples"
+)
