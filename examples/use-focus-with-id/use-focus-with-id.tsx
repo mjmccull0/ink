@@ -7,7 +7,7 @@ import {
 	useInput,
 	useFocusManager,
 } from '../../src/index.js';
-import { useSpawn } from '../../utils.js';
+import { usePassBack, useSpawn } from '../../utils.js';
 
 // Parse CLI args: "Label:Command"
 const args = process.argv.slice(2);
@@ -22,8 +22,11 @@ const items = args.map(arg => {
 function Focus() {
 	const { focus } = useFocusManager();
   const { spawn } = useSpawn();
+	const { passBack } = usePassBack();
 
-	const handlePress = (command: string) => spawn({ command });
+	// const handlePress = (command: string) => spawn({ command });
+	const handlePress = (command: string) => passBack({ command, forceStdout: true });
+
 
 	useInput(input => {
 		const index = parseInt(input, 10);
@@ -67,4 +70,5 @@ function Item({ label, id, onPress }) {
 	);
 }
 
-render(<Focus />);
+const { waitUntilExit } = render(React.createElement(Focus, null), { stdout: process.stderr });
+await waitUntilExit();
