@@ -3,6 +3,7 @@ import {
 	render,
 	Box,
 	Text,
+	useApp,
 	useFocus,
 	useInput,
 	useFocusManager,
@@ -11,21 +12,41 @@ import { usePassBack, useSpawn } from '../../utils.js';
 
 // Parse CLI args: "Label:Command"
 const args = process.argv.slice(2);
-const items = args.map(arg => {
-	const [label, ...cmdParts] = arg.split(':');
-	return {
-		label: label || 'Untitled',
-		command: cmdParts.join(':') || label,
-	};
-});
+
+const flags = {
+    forceStdout: args.includes('--force-stdout'),
+    spawn: args.includes('--spawn'),
+    passBack: args.includes('--pass-back')
+};
+
+const items = args
+    .filter(arg => !arg.startsWith('--'))
+    .map(arg => {
+        const [label, ...cmdParts] = arg.split(':');
+        return {
+            label: label || 'Untitled',
+            command: cmdParts.join(':') || label,
+        };
+    });
 
 function Focus() {
 	const { focus } = useFocusManager();
   const { spawn } = useSpawn();
 	const { passBack } = usePassBack();
 
-	// const handlePress = (command: string) => spawn({ command });
-	const handlePress = (command: string) => passBack({ command, forceStdout: true });
+	const getSelectionHandler = (flags) => {
+		if (flags.spawn && flags.passBack) {
+			throw new Error('Use --spawn or --pass-back.  The default is --spawn.');
+		}
+
+		if (flags.passBack) {
+			return (command: string) => passBack({ command });
+		}
+
+		return (command: string) => spawn({ command })
+	}
+
+	const handlePress = getSelectionHandler(flags);
 
 
 	useInput(input => {
@@ -34,6 +55,7 @@ function Focus() {
 			focus(index.toString());
 		}
 	});
+
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -70,5 +92,28 @@ function Item({ label, id, onPress }) {
 	);
 }
 
-const { waitUntilExit } = render(React.createElement(Focus, null), { stdout: process.stderr });
+// render(<Focus />);
+// Render to stderr
+const { waitUntilExit } = render(React.createElement(Focus, null), {
+    stdout: process.stderr
+});
+
+// Wait for Ink to signal it is ready to die
 await waitUntilExit();
+
+// THE HANDOFF
+// Now that Ink is unmounted, we check if a command was saved
+if (process.env.PENDING_SPAWN) {
+    // Reset the TTY to be absolutely sure fzf/gum are happy
+    process.stdin.setRawMode(false);
+
+    // Spawn directly to the real stdout/stdin
+    const child = spawnProcess(process.env.SHELL || 'zsh', ['-ic', process.env.PENDING_SPAWN], {
+        stdio: 'inherit'
+    });
+
+    // Wait for fzf/gum to finish before the script finally exits
+    child.on('exit', (code) => {
+        process.exit(code);
+    });
+}
