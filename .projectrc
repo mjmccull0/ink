@@ -64,6 +64,36 @@ project_examples() {
 		fi
 }
 
+# @TODO: Move to project plugin
+# The "Discovery" function for your project
+project_gallery() {
+    # Create a unique temp file for the command to exec
+    local tmp_file=$(mktemp /tmp/mink_exec_cmd.XXXXXX)
+
+    # Export the path so Ink knows where to write
+    export MINK_OUTPUT_PATH="$tmp_file"
+
+    # Run the Ink script (pass through any arguments like --stdout)
+    # Using 'command' ensures we don't accidentally call the function recursively
+    npx tsx examples/use-focus-with-id/use-focus-with-id.tsx "$@"
+
+
+    # If the file exists and is not empty, it means a command was selected
+    if [[ -s "$tmp_file" ]]; then
+        local cmd=$(cat "$tmp_file")
+
+        # Clean up the temp file
+        rm "$tmp_file"
+
+        # Execute the command in the current shell environment
+        # This allows the command to access aliases, env vars, and functions
+        eval "$cmd"
+    else
+        # Clean up if the user exited without selecting
+        rm -f "$tmp_file"
+    fi
+}
+
 project_run_test() {
 		DEV=true npx tsx examples/use-focus/use-focus.tsx
 }
@@ -72,6 +102,38 @@ run_example() {
 		DEV=true npx tsx --watch examples/$1/$1.tsx
 }
 
+# Debug
+project_gallery_spawn() {
+    npx tsx examples/use-focus-with-id/use-focus-with-id.tsx --spawn "$@"
+}
+
+project_gallery_pass_back() {
+    # Create a unique temp file to act as the "mailbox"
+    local tmp_file=$(mktemp /tmp/ink_cmd.XXXXXX)
+
+    # Export the path so Ink knows where to write
+    export MINK_OUTPUT_PATH="$tmp_file"
+
+    # Run the Ink script (pass through any arguments like --stdout)
+    # Using 'command' ensures we don't accidentally call the function recursively
+    npx tsx examples/use-focus-with-id/use-focus-with-id.tsx --pass-back "$@"
+
+    # If the file exists and is not empty, it means a command was selected
+    if [[ -s "$tmp_file" ]]; then
+        local cmd=$(cat "$tmp_file")
+
+        # Clean up the temp file
+        rm "$tmp_file"
+
+        echo "echo \$cmd >> /tmp/cmd."
+        # Execute the command in the current shell environment
+        # This allows the command to access aliases, env vars, and functions
+        eval "$cmd"
+    else
+        # Clean up if the user exited without selecting
+        rm -f "$tmp_file"
+    fi
+}
 
 # Define your project-specific mappings
 # Syntax: KEY_SEQUENCE=WIDGET_NAME
@@ -80,7 +142,12 @@ typeset -A PROJECT_KEYS
 # Just map them here
 PROJECT_KEYS=(
     "^[t" "echo It works!"
-    "^[r" "DEV=true npx tsx --watch examples/use-focus-with-id/use-focus-with-id.tsx"
+    # This works; but I thought it used spawn.
+    # "^[r" "DEV=true npx tsx --watch examples/use-focus-with-id/use-focus-with-id.tsx"
+    "^[r" 'project_gallery_pass_back "Branch:project branch" "project" "project_examples"'
+    "^[s" 'project_gallery_spawn "Branch:project branch" "project" "project_examples"'
+    "^[g" 'project_gallery "Branch:project branch" "project" "project_examples"'
+    "^[p" "project"
     "^[b" "project_build"
     "^[w" "npm run dev"
     "^[e" "project_examples"
