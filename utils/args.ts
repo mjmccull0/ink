@@ -1,45 +1,99 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
 export interface CommandItem {
+  key: string;
   label: string;
   command: string;
   outputFilePath: string;
 }
 
-export const parseArgs = (rawArgs: string[]) => {
-  const supportedArguments = {
-    '--output-file': { requiresValue: true },
-  };
+const defaultPath = process.env.MINK_OUTPUT_PATH ||
+		path.join(os.tmpdir(), `mink-exec-${process.pid}.tmp`);
 
-  const getFlagValue = (flag: string) => {
-    const index = rawArgs.indexOf(flag);
-    if (index !== -1 && rawArgs[index + 1] && !rawArgs[index + 1].startsWith('--')) {
-      return rawArgs[index + 1];
+/**
+ * Parser that handles both:
+ * 1. CLI Flags: --key k --label "Name" --command "ls"
+ * 2. STDIN: echo '[{"key": "k", ...}]' | node cli.js
+ */
+export const getCommandItems = async (rawArgs: string[]): Promise<CommandItem[]> => {
+
+  const stdinData = await readStdin();
+  if (stdinData) {
+    try {
+			const rawItems: Partial<CommandItem>[] = JSON.parse(stdinData);
+
+			// 💡 MAP DEFAULTS HERE
+      return rawItems.map((item, index) => ({
+        key: item.key || String(index + 1),
+        label: item.label || item.command || 'Unnamed Task',
+        command: item.command || '',
+        outputFilePath: item.outputFilePath || defaultPath
+      })) as CommandItem[];
+    } catch (e) {
+      process.stderr.write("❌ Error: Invalid JSON provided via STDIN\n");
+      process.exit(1);
     }
-    return null;
-  };
+  }
 
-  const outputFile = getFlagValue('--output-file') ||
-                     process.env.MINK_OUTPUT_PATH ||
-                     path.join(os.tmpdir(), `mink-exec-${process.pid}.tmp`);
+  // 2. Fallback to Grouped Prefix CLI arguments
+  return parseCliArgs(rawArgs);
+};
 
-  const items: CommandItem[] = rawArgs
-    .filter((arg, index) => {
-      if (arg.startsWith('--')) return false;
-      const prevArg = rawArgs[index - 1];
-      if (supportedArguments[prevArg as keyof typeof supportedArguments]?.requiresValue) return false;
-      return true;
-    })
-    .map(arg => {
-      const [label, ...cmdParts] = arg.split(':');
-      const command = cmdParts.join(':') || label;
-      return {
-        label: label || 'Untitled',
-        command: command,
-        outputFilePath: outputFile,
-      };
-    });
+// Helper: Read piped input
+const readStdin = (): Promise<string | null> => {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) return resolve(null); // No pipe detected
 
-  return { items, outputFile };
+    let data = '';
+    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('end', () => resolve(data.trim() || null));
+  });
+};
+
+// Helper: The Grouped Prefix Logic
+const parseCliArgs = (args: string[]): CommandItem[] => {
+  const items: CommandItem[] = [];
+  let pending: Partial<CommandItem> = {};
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    // Helper to grab all words until the next flag
+    const consumeValue = () => {
+      let parts: string[] = [];
+      while (args[i + 1] && !args[i + 1].startsWith('--')) {
+        parts.push(args[++i]);
+      }
+      return parts.join(' ');
+    };
+
+    switch (arg) {
+      case '--key':
+        pending.key = consumeValue();
+        break;
+      case '--label':
+        pending.label = consumeValue();
+        break;
+      case '--output-file':
+        pending.outputFilePath = consumeValue();
+        break;
+      case '--command':
+        const commandValue = consumeValue();
+        if (!commandValue) break;
+
+        items.push({
+          key: pending.key || String(items.length + 1),
+          label: pending.label || commandValue,
+          command: commandValue,
+          outputFilePath: pending.outputFilePath || defaultPath
+        });
+
+        // Reset the buffer for the next item
+        pending = {};
+        break;
+    }
+  }
+  return items;
 };

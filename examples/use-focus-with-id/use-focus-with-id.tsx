@@ -1,60 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import path from 'node:path';
-import os from 'node:os';
+import React from 'react';
+import fs from 'node:fs';
+import tty, { ReadStream } from 'node:tty'; // Import the TTY ReadStream type
 import {
 	render,
 	Box,
 	Text,
-	useApp,
 	useFocus,
 	useInput,
 	useFocusManager,
 } from '../../src/index.js';
 import { useExec } from '../../hooks/useExec.ts';
-// import { parseArgs } from '../../utils/args.ts';
+import { getCommandItems, CommandItem } from '../../utils/args.ts';
 
-// Parse CLI args: "Label:Command"
-const args = process.argv.slice(2);
 
-const supportedArguments = {
-	'--output-file': {
-	  requiresValue: true,
-		default: path.join(os.tmpdir(), `mink-exec-${process.pid}.tmp`),
-	},
-};
+const items = await getCommandItems(process.argv.slice(2));
 
-// Helper to find the value following a flag (e.g., --output-file path/to/file)
-const getFlagValue = (flag) => {
-    const index = args.indexOf(flag);
-    if (index !== -1 && args[index + 1] && !args[index + 1].startsWith('--')) {
-        return args[index + 1];
-    }
-    return null;
-};
-
-const flags = {
-    forceStdout: args.includes('--force-stdout'),
-	  outputFile: getFlagValue('--output-file') ||
-		  process.env.MINK_OUTPUT_PATH ||
-		  path.join(os.tmpdir(), `mink-exec-${process.pid}.tmp`),
-};
-
-const items = args
-	.filter((arg, index) => {
-		if (arg.startsWith('--')) return false;
-		// Check if this arg was a value for a flag (like the path after --output-file)
-		const prevArg = args[index - 1];
-		if (supportedArguments[prevArg]?.requiresValue) return false;
-
-		return true;
-	})
-	.map(arg => {
-		const [ label, ...cmdParts ] = arg.split(':');
-		const command = cmdParts.join(':') || label;
-
-		return { label, command, outputFilePath: flags.outputFile };
-	});
-
+if (items.length === 0) {
+    process.stderr.write("Usage: Provide --command flags or pipe a JSON array.\n");
+    process.exit(1);
+}
 
 function Focus() {
 	const { focus } = useFocusManager();
@@ -64,13 +28,15 @@ function Focus() {
 		command,
 		label,
 		outputFilePath,
-	}) => exec({ command, label, outputFilePath });
+	}: CommandItem) => exec({ command, label, outputFilePath });
 
 	useInput(input => {
-		const index = parseInt(input, 10);
-		if (!isNaN(index) && index > 0 && index <= items.length) {
-			focus(index.toString());
-		}
+		// Look for an item that matches the character pressed
+    const targetItem = items.find(item => item.key === input);
+
+    if (targetItem) {
+        focus(targetItem.key);
+    }
 	});
 
 	return (
@@ -79,10 +45,10 @@ function Focus() {
 				<Text italic color="cyan">{'Select an item and press Enter'}</Text>
 			</Box>
 
-			{items.map((item, index) => (
+			{items.map((item) => (
 				<Item
-					key={index}
-					id={(index + 1).toString()}
+					key={item.key}
+					id={item.key}
 					label={item.label}
 					onPress={() => handlePress(item)}
 				/>
@@ -92,7 +58,8 @@ function Focus() {
 }
 
 function Item({ label, id, onPress }) {
-	const { isFocused } = useFocus({id});
+	const { isFocused } = useFocus({ id });
+	const displayText = `[${id}] ${label}`
 
 	useInput((input, key) => {
 		if (isFocused && (key.return || input === ' ')) {
@@ -103,16 +70,33 @@ function Item({ label, id, onPress }) {
 	return (
 		<Text color={isFocused ? 'green' : undefined}>
 			{isFocused ? '❯ ' : '  '}
-			<Text bold={isFocused}>[{id}] {label}</Text>
+			<Text bold={isFocused}>{displayText}</Text>
 		</Text>
 	);
 }
 
+// 1. Open /dev/tty specifically for reading/writing
+const fd = fs.openSync('/dev/tty', 'r+');
+
+// 2. Create a proper TTY ReadStream from that file descriptor
+const terminalInput = new tty.ReadStream(fd);
+
+// 3. Make sure it's set up to be readable
+terminalInput.setRawMode(true);
+terminalInput.resume();
+
 // render(<Focus />);
 // Render to stderr
 const { waitUntilExit } = render(React.createElement(Focus, null), {
-    stdout: process.stderr
+    stdout: process.stderr,
+	  stdin: terminalInput as unknown as ReadStream,
+	  patchConsole: false,
 });
 
 // Wait for Ink to signal it is ready to die
 await waitUntilExit();
+
+// Cleanup after exit
+terminalInput.setRawMode(false);
+terminalInput.pause();
+fs.closeSync(fd);

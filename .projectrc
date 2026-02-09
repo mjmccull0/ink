@@ -135,20 +135,48 @@ project_gallery_pass_back() {
     fi
 }
 
+# Works!
+# project_task_o() {
+#   echo '[{"key":"b", "label": "Build All", "command": "yarn run build"},{"key": "e", "label": "Run Examples", "command": "project_examples"}]' | project_gallery
+# }
+
+# Works!
+project_task_o() {
+  project_gallery <<EOF
+[
+  {
+    "key": "b",
+    "label": "Build All",
+    "command": "yarn run build"
+  },
+  {
+    "key": "e",
+    "label": "Run Examples",
+    "command": "project_examples"
+  }
+]
+EOF
+}
+
+# project_build_task() {
+# 	echo "[{\"key\":\"b\", \"label\": \"Build $PROJECT_NAME\", \"command\": \"npm run build\"},{\"key\":\"e\",\"label\":\"Run Examples\", \"commands\": \"project_examples\"}]" | project_gallery
+# }
+
 # Define your project-specific mappings
 # Syntax: KEY_SEQUENCE=WIDGET_NAME
 typeset -A PROJECT_KEYS
 
-# Just map them here
+project_run_with_args() {
+	project_gallery --key b --label "Build All" --command "yarn run build" --key e --label "Run Examples" --command "project_examples" --key p --label "Project Menu" --command "project"
+}
+
 PROJECT_KEYS=(
-    "^[t" "echo It works!"
-    # This works; but I thought it used spawn.
-    # "^[r" "DEV=true npx tsx --watch examples/use-focus-with-id/use-focus-with-id.tsx"
-    "^[r" 'project_gallery_pass_back "Branch:project branch" "project" "project_examples"'
-    "^[s" 'project_gallery_spawn "Branch:project branch" "project" "project_examples"'
-    "^[g" 'project_gallery "Branch:project branch" "project" "project_examples"'
-    "^[p" "project"
-    "^[b" "project_build"
+    "^[a" "echo Hellow World"
+    "^[t" "echo 'It works'"
+    "^[r" "project_run_with_args"
+    "^[o" "project_task_o"
+    "^[b" "project_build_task"
+		"^[p" "project"
     "^[w" "npm run dev"
     "^[e" "project_examples"
 )
